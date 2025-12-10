@@ -24,7 +24,7 @@ if (!requireNamespace("clustMixType", quietly = TRUE)) {
 }
 library(clustMixType)
 
-data <- read.csv("final_data_car.csv")
+data <- read.csv("data/final_data_car.csv")
 
 # Convert character columns to factors
 data <- data %>%
