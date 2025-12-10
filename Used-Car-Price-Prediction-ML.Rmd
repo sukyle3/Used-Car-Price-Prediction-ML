@@ -1,0 +1,250 @@
+---
+title: 'Used-Car-Price-Prediction-ML'
+author: "Kyle Su"
+date: "2024-12-10"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## K-Prototype
+
+```{r}
+library(factoextra)
+library(cluster)
+library(ggplot2)
+library(dplyr)
+
+if (!requireNamespace("clustMixType", quietly = TRUE)) {
+  stop("Package 'clustMixType' is required. Please install it before knitting.")
+}
+library(clustMixType)
+
+data <- read.csv("final_data_car.csv")
+
+# Convert character columns to factors
+data <- data %>%
+  mutate(across(where(is.character), as.factor))
+
+# Separate numeric and categorical data with aligned rows
+numeric_data <- data %>% select(where(is.numeric))
+complete_idx <- complete.cases(numeric_data)
+
+data <- data[complete_idx, ]
+numeric_data <- numeric_data[complete_idx, ]
+
+categorical_data <- data %>% select(where(is.factor))
+
+# Scale the numeric data
+scaled_numeric_data <- scale(numeric_data)
+
+# Combine scaled numeric data with categorical data
+combined_data <- cbind(as.data.frame(scaled_numeric_data), categorical_data)
+
+```
+
+
+```{r}
+
+# Function to calculate WSS for different numbers of clusters
+wss_values <- numeric(20)  
+for (k in 1:20) {
+  set.seed(42)
+  kproto_model <- kproto(combined_data, k = k, nstart = 5)
+  wss_values[k] <- kproto_model$tot.withinss
+}
+
+# Plot the elbow chart
+plot(1:20, wss_values, type = "b", pch = 19, col = "blue",
+     xlab = "Number of Clusters (k)", ylab = "Within-Cluster Sum of Squares (WSS)",
+     main = "Elbow Method for K-Prototypes")
+
+```
+
+
+```{r}
+set.seed(42)
+optimal_clusters <- 8
+kproto_result <- kproto(combined_data, k = optimal_clusters)
+
+# Add cluster labels to the dataset
+combined_data$cluster <- as.factor(kproto_result$cluster)
+
+# Print the clustering results
+print(kproto_result)
+
+# Summarize cluster means for scaled numeric variables
+numeric_summary <- data %>%
+  select_if(is.numeric) %>%
+  mutate(cluster = kproto_result$cluster) %>%
+  group_by(cluster) %>%
+  summarize(across(everything(), list(mean = mean, sd = sd), .names = "{.col}_{.fn}"))
+
+print("Numeric Cluster Summary:")
+print(numeric_summary)
+
+
+data$cluster <- kproto_result$cluster
+
+```
+
+
+```{r}
+
+# Assess WSS (within-cluster sum of squares)
+cat("Within-cluster sum of squares:", kproto_result$tot.withinss, "\n")
+```
+
+
+```{r}
+# Compute silhouette score using scaled numeric data
+silhouette_scores <- silhouette(kproto_result$cluster, dist(scaled_numeric_data))
+avg_silhouette <- mean(silhouette_scores[, 3]) 
+cat("Average Silhouette Score:", avg_silhouette, "\n")
+
+# Plot silhouette scores
+plot(silhouette_scores, main = "Silhouette Plot for K-Prototypes Clustering (Scaled Data)", col = 1:optimal_clusters)
+
+```
+
+```{r}
+optimal_clusters <- 8  # Use the optimal k from the elbow chart
+set.seed(42)
+kproto_result <- kproto(combined_data, k = optimal_clusters, nstart = 5)
+
+# Add cluster labels to the dataset
+data$cluster <- kproto_result$cluster
+
+# Print clustering results
+print(kproto_result)
+
+if (!requireNamespace("Rtsne", quietly = TRUE)) {
+  stop("Package 'Rtsne' is required. Please install it before knitting.")
+}
+library(Rtsne)
+
+# Create a mixed dataset with dummy variables for categorical data
+data_mixed <- model.matrix(~ . - 1, data = data)  # Convert categorical variables into dummy variables
+
+# Run t-SNE on the mixed dataset
+set.seed(42)
+tsne_result <- Rtsne(data_mixed, dims = 2, perplexity = 30, verbose = TRUE)
+
+# Create a data frame with t-SNE results and cluster assignments
+tsne_df <- as.data.frame(tsne_result$Y)
+colnames(tsne_df) <- c("Dim1", "Dim2")
+tsne_df$Cluster <- as.factor(data$cluster)
+
+# Plot t-SNE results
+ggplot(tsne_df, aes(x = Dim1, y = Dim2, color = Cluster)) +
+  geom_point(size = 2, alpha = 0.8) +
+  labs(
+    title = "t-SNE Visualization of K-Prototypes Clusters",
+    x = "t-SNE Dimension 1",
+    y = "t-SNE Dimension 2"
+  ) +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+
+```
+
+
+```{r}
+
+
+# Ensure that cluster labels are properly factored and numeric data is grouped correctly
+data$cluster <- factor(data$cluster)  # Convert cluster to factor for proper labeling
+# Boxplot of Milage by Cluster
+ggplot(data, aes(x = cluster, y = milage, fill = cluster)) +
+  geom_boxplot(alpha = 0.7, outlier.color = "black", outlier.size = 1.5) +
+  labs(
+    title = "Boxplot of Milage by Cluster",
+    x = "Cluster",
+    y = "Milage"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none")  # Remove redundant legend if clusters are on the x-axis
+data$log_price <- log(data$price + 1)
+
+# Boxplot of Price by Cluster
+ggplot(data, aes(x = cluster, y = log_price, fill = cluster)) +
+  geom_boxplot(alpha = 0.7, outlier.color = "black", outlier.size = 1.5) +
+  labs(
+    title = "Boxplot of Price by Cluster",
+    x = "Cluster",
+    y = "Price"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none")
+
+# Boxplot of Age by Cluster
+ggplot(data, aes(x = cluster, y = age, fill = cluster)) +
+  geom_boxplot(alpha = 0.7, outlier.color = "black", outlier.size = 1.5) +
+  labs(
+    title = "Boxplot of Age by Cluster",
+    x = "Cluster",
+    y = "Age"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none")
+
+# Boxplot of Engine Displacement by Cluster
+ggplot(data, aes(x = cluster, y = Engine_Displacement, fill = cluster)) +
+  geom_boxplot(alpha = 0.7, outlier.color = "black", outlier.size = 1.5) +
+  labs(
+    title = "Boxplot of Engine Displacement by Cluster",
+    x = "Cluster",
+    y = "Engine Displacement"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1") +
+  theme(legend.position = "none")
+
+```
+
+
+```{r}
+library(broom)
+
+# Fit separate linear regression models for each cluster
+cluster_models <- data %>%
+  group_by(cluster) %>%
+  group_map(~ {
+    model <- lm(price ~ milage + age + Engine_Displacement, data = .x)
+    tidy(model) %>% mutate(cluster = unique(.x$cluster))
+  }) %>%
+  bind_rows()
+
+# Print regression summaries
+print("Cluster-Specific Regression Results:")
+print(cluster_models)
+
+descriptive_stats <- data %>%
+  group_by(cluster) %>%
+  summarize(
+    count = n(),
+    mean_price = mean(price, na.rm = TRUE),
+    median_price = median(price, na.rm = TRUE),
+    sd_price = sd(price, na.rm = TRUE),
+    mean_milage = mean(milage, na.rm = TRUE),
+    median_milage = median(milage, na.rm = TRUE),
+    sd_milage = sd(milage, na.rm = TRUE),
+    mean_age = mean(age, na.rm = TRUE),
+    median_age = median(age, na.rm = TRUE),
+    sd_age = sd(age, na.rm = TRUE),
+    mean_engine_displacement = mean(Engine_Displacement, na.rm = TRUE),
+    median_engine_displacement = median(Engine_Displacement, na.rm = TRUE),
+    sd_engine_displacement = sd(Engine_Displacement, na.rm = TRUE)
+  )
+
+print("Descriptive Statistics by Cluster:")
+print(descriptive_stats)
+
+```
